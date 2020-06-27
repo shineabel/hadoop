@@ -1,0 +1,1181 @@
+课程论文需求说明：
+
+空气质量数据格式：
+
+站号,经度,纬度,PM25,PM10,NO2,SO2,O3-1,O3-8h,CO,AQI,等级,年，月，日，小时，城市。  ","分割。
+99000,115.49,38.88,43,68,21,20,104,104,0.6,60,2,2018,8,1,0,北京
+99001,115.51,38.88,38,58,26,20,120,120,0.6,54,2,2018,8,1,0,北京
+99002,115.47,38.91,50,72,22,17,113,113,0.7,69,2,2018,8,1,0,北京
+99004,115.45,38.88,52,108,46,21,66,66,0.7,79,2,2018,8,1,0,北京
+99006,116.36,39.87,55,80,27,2,60,60,1.3,75,2,2018,8,1,0,北京
+99007,116.23,40.3,42,56,11,2,105,105,0.7,59,2,2018,8,1,0,北京
+99008,116.39,39.93,57,88,26,3,99,99,0.9,78,2,2018,8,1,0,北京
+99009,116.41,39.88,57,63,52,3,41,41,0.9,78,2,2018,8,1,0,北京
+99010,116.46,39.94,51,80,45,2,113,113,1.1,70,2,2018,8,1,0,北京
+99011,116.36,39.93,52,96,33,3,77,77,1.0,73,2,2018,8,1,0,北京
+99012,116.3,39.97,52,95,59,3,46,46,1.1,73,2,2018,8,1,0,北京
+99013,116.65,40.18,41,88,38,2,46,46,1.1,69,2,2018,8,1,0,北京
+99014,116.64,40.3,40,69,11,3,112,112,0.9,60,2,2018,8,1,0,北京
+99015,116.22,40.22,41,55,16,3,100,100,0.7,58,2,2018,8,1,0,北京
+99016,116.4,39.99,52,81,22,3,111,111,0.8,72,2,2018,8,1,0,北京
+99017,116.19,39.9,50,69,59,2,45,45,0.7,69,2,2018,8,1,0,北京
+99223,116.69,39.52,76,97,41,7,72,72,1.2,102,3,2018,8,1,0,北京
+99222,116.8,39.58,39,102,45,4,26,26,1.7,76,2,2018,8,1,0,北京
+98090,116.7,39.51,71,98,59,8,78,78,1.2,95,2,2018,8,1,0,北京
+95107,117.14,39.16,53,93,75,49,36,18,2.1,73,2,2018,8,1,0,北京
+95116,117.17,39.07,32,77,37,3,51,51,0.8,64,2,2018,8,1,0,北京
+95121,117.19,39.22,66,108,69,2,60,60,0.9,89,2,2018,8,1,0,北京
+99000,115.49,38.88,48,76,17,29,107,106,0.7,67,2,2018,8,1,1,北京
+............................
+............................
+
+数据近40万行，时间从2018.8.1 零点 至 2019.6.10 23点，城市有
+北京，上海， 天津，青岛，济南，厦门，郑州，乌鲁木齐，成都，呼和浩特，海口和昆明；其中每个城市有很多站号（采集点），
+一个站号，每个小时的采集数据占一行。
+
+要求：
+1. 这个时间范围内，哪个城市的PM25统计指标最低，哪个最高；统计指标(模型)自己决定，需要说明指标确定理由。
+【计算出每个城市所有时间的PM2.5平均数】
+2. 统计2019年2月份期间（春节期间）北京、上海、成都不同空气情况的分布天数（空气质量：优、良、轻度污染、中度污染、重度污染天数分布），空气质量标准参照国家颁布的标准。
+【根据AQI指数的大小判断其空气质量等级，0~50、51~100、101~150、151~200、201~300】
+3. 自己提分析需求并实现（选做）。
+【可以用上面相似的过程，计算一下PM10之类的？或者其他想法也可】
+
+实现环境
+Hadoop2.6.0
+Java1.8
+IntelliJ IDEA
+Maven
+
+方案设计
+第一问：
+（1）将每行数据读入切割并封装成bean对象，利用城市名作为key，value为PM2.5的值，将Map阶段读取到的所有数据按照城市名排序分组，发送到Reduce。在Reduce之前对数据进行比较，只要城市相名相同的则认为是同一个key，Reduce中计算各个城市PM2.5的平均值。
+（2）将上一步输出的数据同样封装成bean对象，将PM2.5的平均值进行排序，value为空。最后发送到Reduce进行保存输出。
+
+第二问：
+（1）由于每个城市每天有多个站点在采集数据，故需要先按照城市名+日期分组，计算每个城市AQI的平均值，并输出
+（2）获得每个城市每天的AQI平均值后，再根据AQI标准进行空气质量等级分类，并输出
+
+代码实现
+第一问：
+
+
+import org.apache.hadoop.io.WritableComparable;
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+
+public class DataBean implements WritableComparable<DataBean> {
+    private String cityName;
+    private double pmValue;
+
+    public DataBean() {
+        super();
+    }
+    public DataBean(String cityName, int pmValue) {
+        super();
+        this.cityName = cityName;
+        this.pmValue = pmValue;
+    }
+
+
+    public String getCityName() {
+        return cityName;
+    }
+
+    public void setCityName(String cityName) {
+        this.cityName = cityName;
+    }
+
+    public double getPmValue() {
+        return pmValue;
+    }
+
+    public void setPmValue(double pmValue) {
+        this.pmValue = pmValue;
+    }
+
+
+    public int compareTo(DataBean o) {
+
+        return o.getCityName().compareTo(this.getCityName());
+    }
+
+    public void write(DataOutput out) throws IOException {
+
+        out.writeUTF(cityName);
+        out.writeDouble(pmValue);
+    }
+
+    public void readFields(DataInput in) throws IOException {
+
+        cityName = in.readUTF();
+        pmValue = in.readDouble();
+
+    }
+
+    @Override
+    public String toString() {
+        String pmValueStr = String.format("%.2f",pmValue);
+        return  cityName +"\t"+pmValueStr ;
+    }
+}
+
+
+
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.io.WritableComparator;
+
+public class PM_GroupCompare extends WritableComparator {
+    protected  PM_GroupCompare(){
+        super(DataBean.class,true);
+    }
+    @Override
+    public int compare(WritableComparable a,WritableComparable b) {
+
+        DataBean db1 = (DataBean) a ;
+        DataBean db2 = (DataBean) b ;
+
+       
+        return db1.getCityName().compareTo(db2.getCityName());
+    }
+}
+
+
+
+
+import org.apache.hadoop.io.DoubleWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+import java.io.IOException;
+public class PM_map extends Mapper<LongWritable, Text, DataBean, DoubleWritable> {
+        DataBean db = new DataBean();
+        DoubleWritable v = new DoubleWritable(0);
+
+@Override
+protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+
+//	站号,经度,纬度,PM25,PM10,NO2,SO2,O3-1,O3-8h,CO,AQI,等级,年，月，日，小时，城市。  ","分割。
+//	99000,115.49,38.88,43,68,21,20,104,104,0.6,60,2,2018,8,1,0,北京
+        String line = value.toString();
+        String[] spilt = line.split(",");
+        String cityName = spilt[16];
+        double  pmValue =  Double.parseDouble(spilt[3]);
+
+        db.setCityName(cityName);
+        db.setPmValue(pmValue);
+
+        v.set(pmValue);
+        context.write(db,v);
+        }
+}
+
+
+
+
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.io.DoubleWritable;
+import org.apache.hadoop.io.NullWritable;
+import java.io.IOException;
+
+public class PM_reduce extends Reducer<DataBean, DoubleWritable, DataBean, NullWritable> {
+    private long count;
+    private double sum;
+
+    @Override
+    protected void reduce(DataBean key, Iterable<DoubleWritable> values, Context context) throws IOException, InterruptedException {
+
+        sum = 0;
+        count = 0;
+        DoubleWritable v = new DoubleWritable();
+        for (DoubleWritable value : values) {
+            sum += value.get();
+            count++;
+        }
+        double avr =  sum/count;
+        v.set(avr);
+        key.setPmValue(avr);
+        context.write(key,NullWritable.get());
+    }
+}
+
+
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.DoubleWritable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+public class PM_job  {
+    
+    public static void main(String[] args) throws Exception {
+    	Configuration configuration = new Configuration();
+    	 //1.获取job
+        Job job =  Job.getInstance(configuration);
+        //2.设置jar包路径
+        job.setJarByClass(PM_job.class);
+        job.setMapperClass(PM_map.class);
+        job.setReducerClass(PM_reduce.class);
+        //设置最后 kv类型
+        job.setOutputKeyClass(DataBean.class);
+        job.setOutputValueClass(NullWritable.class);
+        //设置map输出类型
+        job.setMapOutputKeyClass(DataBean.class);
+        job.setMapOutputValueClass(DoubleWritable.class);
+
+        //设置输入输出路径
+        FileInputFormat.setInputPaths(job,new Path(args[0]));
+        FileOutputFormat.setOutputPath(job,new Path(args[1]));
+
+        job.setGroupingComparatorClass(PM_GroupCompare.class);
+        job.waitForCompletion(true);
+    }
+
+}
+
+
+第二问：
+（1）第一步
+
+
+
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+
+import org.apache.hadoop.io.WritableComparable;
+
+
+public class DataBean1 implements WritableComparable<DataBean1> {
+    private String cityName;
+    private String day;
+    private double aqi = 0d;
+   
+    
+    
+	public DataBean1(String cityName, String day, double aqi) {
+		super();
+		this.cityName = cityName;
+		this.day = day;
+		this.aqi = aqi;
+	}
+
+
+
+
+
+	public DataBean1() {
+		super();
+	}
+	
+	
+
+
+
+	public String getDay() {
+		return day;
+	}
+
+
+
+
+
+	public void setDay(String day) {
+		this.day = day;
+	}
+
+
+
+
+
+	public double getAqi() {
+		return aqi;
+	}
+
+
+
+
+
+	public void setAqi(double aqi) {
+		this.aqi = aqi;
+	}
+
+
+
+
+
+	public String getCityName() {
+		return cityName;
+	}
+	public void setCityName(String cityName) {
+		this.cityName = cityName;
+	}
+	
+	
+	
+    public int compareTo(DataBean1 o) {
+
+        int result = o.getCityName().compareTo(this.getCityName());
+        if(result == 0) {
+        	result = o.getDay().compareTo(this.getDay());
+        }
+        return result;
+    }
+
+    public void write(DataOutput out) throws IOException {
+
+        out.writeUTF(cityName);
+        out.writeUTF(day);
+        out.writeDouble(aqi);
+        
+    }
+
+    public void readFields(DataInput in) throws IOException {
+
+        cityName = in.readUTF();
+        day = in.readUTF();
+        aqi = in.readDouble();
+
+    }
+
+    @Override
+    public String toString() {
+        return  cityName +","+day +","+aqi ;
+    }
+}
+
+
+
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.io.WritableComparator;
+
+public class PM_GroupCompare1 extends WritableComparator {
+    protected  PM_GroupCompare1(){
+        super(DataBean1.class,true);
+    }
+    @Override
+    public int compare(WritableComparable a,WritableComparable b) {
+
+        DataBean1 db1 = (DataBean1) a ;
+        DataBean1 db2 = (DataBean1) b ;
+
+       
+        int result = db1.getCityName().compareTo(db2.getCityName());
+        if(result == 0) {
+        	result = db1.getDay().compareTo(db2.getDay());
+        }
+        return result;
+    }
+}
+
+
+import java.io.IOException;
+
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+public class PM_map1 extends Mapper<LongWritable, Text, DataBean1, DataBean1> {
+	
+
+	@Override
+	protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+
+//	站号,经度,纬度,PM25,PM10,NO2,SO2,O3-1,O3-8h,CO,AQI,等级,年，月，日，小时，城市。  ","分割。
+//	99000,115.49,38.88,43,68,21,20,104,104,0.6,60,2,2018,8,1,0,北京
+		String line = value.toString();
+		String[] spilt = line.split(",");
+		String cityName = spilt[16];
+		String y = spilt[12];
+		String m = spilt[13];
+		String d = spilt[14];
+		DataBean1 dataBean = new DataBean1();
+		double  aqiValue =  Double.parseDouble(spilt[10]);
+
+		if (y.equals("2019") && m.equals("2")
+				&& (cityName.equals("北京") || cityName.equals("上海") || cityName.equals("成都"))) {
+			dataBean.setCityName(cityName);
+			dataBean.setAqi(aqiValue);
+			dataBean.setDay(y + "-" + m  + "-" + d);
+			context.write(dataBean, dataBean);
+		}
+	}
+}
+
+
+
+import java.io.IOException;
+
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.mapreduce.Reducer;
+
+public class PM_reduce1 extends Reducer<DataBean1, DataBean1, DataBean1, NullWritable> {
+
+	private long count;
+    private double sum;
+    
+    @Override
+    protected void reduce(DataBean1 key, Iterable<DataBean1> values, Context context) throws IOException, InterruptedException {
+    	DataBean1 dataBean = new DataBean1();
+       
+        dataBean.setCityName(key.getCityName());
+        dataBean.setDay(key.getDay());
+        
+        sum = 0;
+        count = 0;
+        for (DataBean1 value : values) {
+            sum += value.getAqi();
+            count++;
+        }
+        double avr =  sum/count;
+       dataBean.setAqi(avr);
+        
+        
+        context.write(dataBean,NullWritable.get());
+    }
+}
+
+
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.DoubleWritable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+public class PM_job1  {
+    
+    public static void main(String[] args) throws Exception {
+    	Configuration configuration = new Configuration();
+    	 //1.获取job
+        Job job =  Job.getInstance(configuration);
+        //2.设置jar包路径
+        job.setJarByClass(PM_job1.class);
+        job.setMapperClass(PM_map1.class);
+        job.setReducerClass(PM_reduce1.class);
+        //设置最后 kv类型
+        job.setOutputKeyClass(DataBean1.class);
+        job.setOutputValueClass(NullWritable.class);
+        //设置map输出类型
+        job.setMapOutputKeyClass(DataBean1.class);
+        job.setMapOutputValueClass(DataBean1.class);
+
+        //设置输入输出路径
+        FileInputFormat.setInputPaths(job,new Path(args[0]));
+        FileOutputFormat.setOutputPath(job,new Path(args[1]));
+
+        job.setGroupingComparatorClass(PM_GroupCompare1.class);
+        job.waitForCompletion(true);
+    }
+
+}
+
+
+（2）第二步
+
+
+
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+
+import org.apache.hadoop.io.WritableComparable;
+
+
+public class DataBean2 implements WritableComparable<DataBean2> {
+    private String cityName;
+    private Long levelADayCount = 0l;
+    private Long levelBDayCount = 0l;
+    private Long levelCDayCount = 0l;
+    private Long levelDDayCount = 0l;
+    private Long levelEDayCount = 0l;
+    
+    
+	public DataBean2() {
+		super();
+	}
+	
+	
+	public DataBean2(String cityName, Long levelADayCount, Long levelBDayCount, Long levelCDayCount, Long levelDDayCount,
+			Long levelEDayCount) {
+		super();
+		this.cityName = cityName;
+		this.levelADayCount = levelADayCount;
+		this.levelBDayCount = levelBDayCount;
+		this.levelCDayCount = levelCDayCount;
+		this.levelDDayCount = levelDDayCount;
+		this.levelEDayCount = levelEDayCount;
+	}
+
+
+	public String getCityName() {
+		return cityName;
+	}
+	public void setCityName(String cityName) {
+		this.cityName = cityName;
+	}
+	
+	public Long getLevelADayCount() {
+		return levelADayCount;
+	}
+	public void setLevelADayCount(Long levelADayCount) {
+		this.levelADayCount = levelADayCount;
+	}
+	public Long getLevelBDayCount() {
+		return levelBDayCount;
+	}
+	public void setLevelBDayCount(Long levelBDayCount) {
+		this.levelBDayCount = levelBDayCount;
+	}
+	public Long getLevelCDayCount() {
+		return levelCDayCount;
+	}
+	public void setLevelCDayCount(Long levelCDayCount) {
+		this.levelCDayCount = levelCDayCount;
+	}
+	public Long getLevelDDayCount() {
+		return levelDDayCount;
+	}
+	public void setLevelDDayCount(Long levelDDayCount) {
+		this.levelDDayCount = levelDDayCount;
+	}
+	public Long getLevelEDayCount() {
+		return levelEDayCount;
+	}
+	public void setLevelEDayCount(Long levelEDayCount) {
+		this.levelEDayCount = levelEDayCount;
+	}
+	
+    public int compareTo(DataBean2 o) {
+
+        return o.getCityName().compareTo(this.getCityName());
+    }
+
+    public void write(DataOutput out) throws IOException {
+
+        out.writeUTF(cityName);
+        out.writeLong(levelADayCount);
+        out.writeLong(levelBDayCount);
+        out.writeLong(levelCDayCount);
+        out.writeLong(levelDDayCount);
+        out.writeLong(levelEDayCount);
+    }
+
+    public void readFields(DataInput in) throws IOException {
+
+        cityName = in.readUTF();
+        levelADayCount = in.readLong();
+        levelBDayCount = in.readLong();
+        levelCDayCount = in.readLong();
+        levelDDayCount = in.readLong();
+        levelEDayCount = in.readLong();
+
+    }
+
+    @Override
+    public String toString() {
+        return  cityName +"\t,"+levelADayCount +"\t,"+levelBDayCount +"\t,"+levelCDayCount +"\t,"+levelDDayCount +"\t,"+levelEDayCount ;
+    }
+}
+
+
+
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.io.WritableComparator;
+
+public class PM_GroupCompare2 extends WritableComparator {
+    protected  PM_GroupCompare2(){
+        super(DataBean2.class,true);
+    }
+    @Override
+    public int compare(WritableComparable a,WritableComparable b) {
+
+        DataBean2 db1 = (DataBean2) a ;
+        DataBean2 db2 = (DataBean2) b ;
+
+       
+        return db1.getCityName().compareTo(db2.getCityName());
+    }
+}
+
+
+import java.io.IOException;
+import java.math.BigDecimal;
+
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+public class PM_map2 extends Mapper<LongWritable, Text, DataBean2, DataBean2> {
+	
+
+	@Override
+	protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+
+//	站号,经度,纬度,PM25,PM10,NO2,SO2,O3-1,O3-8h,CO,AQI,等级,年，月，日，小时，城市。  ","分割。
+//	99000,115.49,38.88,43,68,21,20,104,104,0.6,60,2,2018,8,1,0,北京
+		String line = value.toString();
+		String[] spilt = line.split(",");
+		String cityName = spilt[0];
+		DataBean2 dataBean = new DataBean2();
+		BigDecimal pmValue = new BigDecimal(spilt[2]);
+
+			dataBean.setCityName(cityName);
+			// 0~50、51~100、101~150、151~200、201~300
+			if (pmValue.compareTo(BigDecimal.ZERO) >= 0 && pmValue.compareTo(new BigDecimal(50)) <= 0) {
+				dataBean.setLevelADayCount(1l);
+			}
+			if (pmValue.compareTo(new BigDecimal(51)) >= 0 && pmValue.compareTo(new BigDecimal(100)) <= 0) {
+				dataBean.setLevelBDayCount(1l);
+			}
+			if (pmValue.compareTo(new BigDecimal(101)) >= 0 && pmValue.compareTo(new BigDecimal(150)) <= 0) {
+				dataBean.setLevelCDayCount(1l);
+			}
+			if (pmValue.compareTo(new BigDecimal(151)) >= 0 && pmValue.compareTo(new BigDecimal(200)) <= 0) {
+				dataBean.setLevelDDayCount(1l);
+			}
+			if (pmValue.compareTo(new BigDecimal(201)) >= 0 && pmValue.compareTo(new BigDecimal(300)) <= 0) {
+				dataBean.setLevelEDayCount(1l);
+			}
+			context.write(dataBean, dataBean);
+	}
+}
+
+
+import java.io.IOException;
+
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+public class PM_reduce2 extends Reducer<DataBean2, DataBean2, DataBean2, NullWritable> {
+
+    @Override
+    protected void reduce(DataBean2 key, Iterable<DataBean2> values, Context context) throws IOException, InterruptedException {
+    	DataBean2 dataBean = new DataBean2();
+        long acount = 0;
+        long bcount = 0;
+        long ccount = 0;
+        long dcount = 0;
+        long ecount = 0;
+        dataBean.setCityName(key.getCityName());
+        for (DataBean2 value : values) {
+            if(value.getLevelADayCount().intValue() == 1) {
+            	acount ++;
+            }
+            if(value.getLevelBDayCount().intValue() == 1) {
+            	bcount ++;
+            }
+            if(value.getLevelCDayCount().intValue() == 1) {
+            	ccount ++;
+            }
+            if(value.getLevelDDayCount().intValue() == 1) {
+            	dcount ++;
+            }
+            if(value.getLevelEDayCount().intValue() == 1) {
+            	ecount ++;
+            }
+        }
+        dataBean.setLevelADayCount(acount);
+        dataBean.setLevelBDayCount(bcount);
+        dataBean.setLevelCDayCount(ccount);
+        dataBean.setLevelDDayCount(dcount);
+        dataBean.setLevelEDayCount(ecount);
+        
+        context.write(dataBean,NullWritable.get());
+    }
+}
+
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.DoubleWritable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+public class PM_job2  {
+    
+    public static void main(String[] args) throws Exception {
+    	Configuration configuration = new Configuration();
+    	 //1.获取job
+        Job job =  Job.getInstance(configuration);
+        //2.设置jar包路径
+        job.setJarByClass(PM_job2.class);
+        job.setMapperClass(PM_map2.class);
+        job.setReducerClass(PM_reduce2.class);
+        //设置最后 kv类型
+        job.setOutputKeyClass(DataBean2.class);
+        job.setOutputValueClass(NullWritable.class);
+        //设置map输出类型
+        job.setMapOutputKeyClass(DataBean2.class);
+        job.setMapOutputValueClass(DataBean2.class);
+
+        //设置输入输出路径
+        FileInputFormat.setInputPaths(job,new Path(args[0]));
+        FileOutputFormat.setOutputPath(job,new Path(args[1]));
+
+        job.setGroupingComparatorClass(PM_GroupCompare2.class);
+        job.waitForCompletion(true);
+    }
+
+}
+
+
+
+运行结果展示：
+第一问：
+[root@hadoop1 ~]# hadoop jar /root/pm-1.0-SNAPSHOT.jar PM_job /input/PM25city.txt1 /output/pm25_0627_8
+20/06/26 22:39:03 INFO client.RMProxy: Connecting to ResourceManager at hadoop1/192.168.58.160:8032
+20/06/26 22:39:04 WARN mapreduce.JobSubmitter: Hadoop command-line option parsing not performed. Implement the Tool interface and execute your application with ToolRunner to remedy this.
+20/06/26 22:39:05 INFO input.FileInputFormat: Total input paths to process : 1
+20/06/26 22:39:05 INFO mapreduce.JobSubmitter: number of splits:1
+20/06/26 22:39:05 INFO mapreduce.JobSubmitter: Submitting tokens for job: job_1593142855421_0021
+20/06/26 22:39:06 INFO impl.YarnClientImpl: Submitted application application_1593142855421_0021
+20/06/26 22:39:06 INFO mapreduce.Job: The url to track the job: http://hadoop1:8088/proxy/application_1593142855421_0021/
+20/06/26 22:39:06 INFO mapreduce.Job: Running job: job_1593142855421_0021
+20/06/26 22:39:15 INFO mapreduce.Job: Job job_1593142855421_0021 running in uber mode : false
+20/06/26 22:39:15 INFO mapreduce.Job:  map 0% reduce 0%
+20/06/26 22:39:28 INFO mapreduce.Job:  map 100% reduce 0%
+20/06/26 22:39:36 INFO mapreduce.Job:  map 100% reduce 100%
+20/06/26 22:39:37 INFO mapreduce.Job: Job job_1593142855421_0021 completed successfully
+20/06/26 22:39:37 INFO mapreduce.Job: Counters: 49
+	File System Counters
+		FILE: Number of bytes read=10528632
+		FILE: Number of bytes written=21268847
+		FILE: Number of read operations=0
+		FILE: Number of large read operations=0
+		FILE: Number of write operations=0
+		HDFS: Number of bytes read=26509416
+		HDFS: Number of bytes written=168
+		HDFS: Number of read operations=6
+		HDFS: Number of large read operations=0
+		HDFS: Number of write operations=2
+	Job Counters 
+		Launched map tasks=1
+		Launched reduce tasks=1
+		Data-local map tasks=1
+		Total time spent by all maps in occupied slots (ms)=9228
+		Total time spent by all reduces in occupied slots (ms)=6418
+		Total time spent by all map tasks (ms)=9228
+		Total time spent by all reduce tasks (ms)=6418
+		Total vcore-seconds taken by all map tasks=9228
+		Total vcore-seconds taken by all reduce tasks=6418
+		Total megabyte-seconds taken by all map tasks=9449472
+		Total megabyte-seconds taken by all reduce tasks=6572032
+	Map-Reduce Framework
+		Map input records=398355
+		Map output records=398355
+		Map output bytes=9731916
+		Map output materialized bytes=10528632
+		Input split bytes=104
+		Combine input records=0
+		Combine output records=0
+		Reduce input groups=12
+		Reduce shuffle bytes=10528632
+		Reduce input records=398355
+		Reduce output records=12
+		Spilled Records=796710
+		Shuffled Maps =1
+		Failed Shuffles=0
+		Merged Map outputs=1
+		GC time elapsed (ms)=637
+		CPU time spent (ms)=9040
+		Physical memory (bytes) snapshot=298831872
+		Virtual memory (bytes) snapshot=4168523776
+		Total committed heap usage (bytes)=148787200
+	Shuffle Errors
+		BAD_ID=0
+		CONNECTION=0
+		IO_ERROR=0
+		WRONG_LENGTH=0
+		WRONG_MAP=0
+		WRONG_REDUCE=0
+	File Input Format Counters 
+		Bytes Read=26509312
+	File Output Format Counters 
+		Bytes Written=168
+[root@hadoop1 ~]# hadoop fs -cat /output/pm25_0627_8/part-r-00000
+青岛	60.41
+郑州
+	94.13
+海口	16.02
+济南	83.21
+昆明	23.65
+成都	56.21
+天津	56.37
+呼和浩特	41.76
+厦门	27.68
+北京	54.74
+乌鲁木齐	83.68
+上海	41.38
+
+最高为郑州：94.14，最低为昆明:23.65
+
+
+第二问：
+[root@hadoop1 ~]# hadoop jar /root/pm2-1.0-SNAPSHOT.jar PM_job1 /input/PM25city.txt1 /output/pm25_0627_4
+20/06/26 21:13:53 INFO client.RMProxy: Connecting to ResourceManager at hadoop1/192.168.58.160:8032
+20/06/26 21:13:54 WARN mapreduce.JobSubmitter: Hadoop command-line option parsing not performed. Implement the Tool interface and execute your application with ToolRunner to remedy this.
+20/06/26 21:13:54 INFO input.FileInputFormat: Total input paths to process : 1
+20/06/26 21:13:54 INFO mapreduce.JobSubmitter: number of splits:1
+20/06/26 21:13:55 INFO mapreduce.JobSubmitter: Submitting tokens for job: job_1593142855421_0019
+20/06/26 21:13:55 INFO impl.YarnClientImpl: Submitted application application_1593142855421_0019
+20/06/26 21:13:55 INFO mapreduce.Job: The url to track the job: http://hadoop1:8088/proxy/application_1593142855421_0019/
+20/06/26 21:13:55 INFO mapreduce.Job: Running job: job_1593142855421_0019
+20/06/26 21:14:01 INFO mapreduce.Job: Job job_1593142855421_0019 running in uber mode : false
+20/06/26 21:14:01 INFO mapreduce.Job:  map 0% reduce 0%
+20/06/26 21:14:07 INFO mapreduce.Job:  map 100% reduce 0%
+20/06/26 21:14:13 INFO mapreduce.Job:  map 100% reduce 100%
+20/06/26 21:14:13 INFO mapreduce.Job: Job job_1593142855421_0019 completed successfully
+20/06/26 21:14:13 INFO mapreduce.Job: Counters: 49
+	File System Counters
+		FILE: Number of bytes read=2367654
+		FILE: Number of bytes written=4946851
+		FILE: Number of read operations=0
+		FILE: Number of large read operations=0
+		FILE: Number of write operations=0
+		HDFS: Number of bytes read=26509416
+		HDFS: Number of bytes written=2924
+		HDFS: Number of read operations=6
+		HDFS: Number of large read operations=0
+		HDFS: Number of write operations=2
+	Job Counters 
+		Launched map tasks=1
+		Launched reduce tasks=1
+		Data-local map tasks=1
+		Total time spent by all maps in occupied slots (ms)=3368
+		Total time spent by all reduces in occupied slots (ms)=3329
+		Total time spent by all map tasks (ms)=3368
+		Total time spent by all reduce tasks (ms)=3329
+		Total vcore-seconds taken by all map tasks=3368
+		Total vcore-seconds taken by all reduce tasks=3329
+		Total megabyte-seconds taken by all map tasks=3448832
+		Total megabyte-seconds taken by all reduce tasks=3408896
+	Map-Reduce Framework
+		Map input records=398355
+		Map output records=42825
+		Map output bytes=2281998
+		Map output materialized bytes=2367654
+		Input split bytes=104
+		Combine input records=0
+		Combine output records=0
+		Reduce input groups=84
+		Reduce shuffle bytes=2367654
+		Reduce input records=42825
+		Reduce output records=84
+		Spilled Records=85650
+		Shuffled Maps =1
+		Failed Shuffles=0
+		Merged Map outputs=1
+		GC time elapsed (ms)=329
+		CPU time spent (ms)=3420
+		Physical memory (bytes) snapshot=291864576
+		Virtual memory (bytes) snapshot=4168585216
+		Total committed heap usage (bytes)=140894208
+	Shuffle Errors
+		BAD_ID=0
+		CONNECTION=0
+		IO_ERROR=0
+		WRONG_LENGTH=0
+		WRONG_MAP=0
+		WRONG_REDUCE=0
+	File Input Format Counters 
+		Bytes Read=26509312
+	File Output Format Counters 
+		Bytes Written=2924
+[root@hadoop1 ~]# hadoop fs -cat /output/pm25_0627_4/part-r-00000
+成都,2019-2-9,56.70477815699659
+成都,2019-2-8,75.45640074211502
+成都,2019-2-7,85.05602716468591
+成都,2019-2-6,104.1522491349481
+成都,2019-2-5,149.9373913043478
+成都,2019-2-4,80.15724381625442
+成都,2019-2-3,72.72744360902256
+成都,2019-2-28,74.92293577981651
+成都,2019-2-27,58.45420560747664
+成都,2019-2-26,65.93320610687023
+成都,2019-2-25,73.10990990990992
+成都,2019-2-24,69.85191637630662
+成都,2019-2-23,117.37912087912088
+成都,2019-2-22,110.3632958801498
+成都,2019-2-21,73.71327433628319
+成都,2019-2-20,76.46460980036298
+成都,2019-2-2,94.64737793851718
+成都,2019-2-19,57.574585635359114
+成都,2019-2-18,37.37623762376238
+成都,2019-2-17,55.329446064139944
+成都,2019-2-16,67.88945578231292
+成都,2019-2-15,70.23255813953489
+成都,2019-2-14,82.96625222024866
+成都,2019-2-13,74.76785714285714
+成都,2019-2-12,52.68352059925093
+成都,2019-2-11,53.89087656529517
+成都,2019-2-10,43.973333333333336
+成都,2019-2-1,85.16606498194946
+北京,2019-2-9,31.506276150627617
+北京,2019-2-8,46.540117416829744
+北京,2019-2-7,37.265469061876246
+北京,2019-2-6,78.51948051948052
+北京,2019-2-5,170.7734082397004
+北京,2019-2-4,99.8956043956044
+北京,2019-2-3,121.0806142034549
+北京,2019-2-28,142.02212389380531
+北京,2019-2-27,101.7125
+北京,2019-2-26,66.73849372384937
+北京,2019-2-25,75.21256038647343
+北京,2019-2-24,158.76923076923077
+北京,2019-2-23,195.65865384615384
+北京,2019-2-22,207.9163179916318
+北京,2019-2-21,169.34751773049646
+北京,2019-2-20,125.2179104477612
+北京,2019-2-2,143.92638036809817
+北京,2019-2-19,156.68464730290455
+北京,2019-2-18,77.89781021897811
+北京,2019-2-17,35.91575091575091
+北京,2019-2-16,27.83622350674374
+北京,2019-2-15,37.24455205811138
+北京,2019-2-14,64.50769230769231
+北京,2019-2-13,51.111617312072894
+北京,2019-2-12,66.37869822485207
+北京,2019-2-11,83.689453125
+北京,2019-2-10,51.72357723577236
+北京,2019-2-1,86.70208728652752
+上海,2019-2-9,31.957303370786516
+上海,2019-2-8,28.922365988909426
+上海,2019-2-7,54.767100977198695
+上海,2019-2-6,85.75257731958763
+上海,2019-2-5,70.6678486997636
+上海,2019-2-4,136.88491048593352
+上海,2019-2-3,99.23975409836065
+上海,2019-2-28,54.42175066312998
+上海,2019-2-27,44.53884711779449
+上海,2019-2-26,63.329351535836174
+上海,2019-2-25,116.38689217758986
+上海,2019-2-24,154.33130081300814
+上海,2019-2-23,161.39407744874714
+上海,2019-2-22,77.63254593175853
+上海,2019-2-21,85.51724137931035
+上海,2019-2-20,80.91749174917491
+上海,2019-2-2,82.09510086455332
+上海,2019-2-19,42.13573407202216
+上海,2019-2-18,29.666011787819254
+上海,2019-2-17,41.034979423868315
+上海,2019-2-16,63.211717709720375
+上海,2019-2-15,28.83941605839416
+上海,2019-2-14,45.70854271356784
+上海,2019-2-13,44.024566473988436
+上海,2019-2-12,45.11092985318108
+上海,2019-2-11,44.08303249097473
+上海,2019-2-10,30.294117647058822
+上海,2019-2-1,87.12014134275618
+
+
+[root@hadoop1 ~]# hadoop fs -get /output/pm25_0627_4/part-r-00000 pm25_job1
+[root@hadoop1 ~]# ll
+total 171684
+-rw-r--r--. 1 root root   250596 Jun 25 21:12 23.txt
+-rw-------. 1 root root     1260 Apr  4 09:57 anaconda-ks.cfg
+-rw-r--r--. 1 root root        0 Jun 26 12:06 beijing.txt
+-rw-r--r--. 1 root root 40834586 Jun 25 23:18 com.hw-1.0-SNAPSHOT.jar
+-rw-r--r--. 1 root root 40834785 Jun 26 05:10 pm-1.0-SNAPSHOT.jar
+-rw-r--r--. 1 root root 40840495 Jun 26 21:13 pm2-1.0-SNAPSHOT.jar
+-rw-r--r--. 1 root root 26509402 Jun 26 05:07 PM25city.txt
+-rw-r--r--. 1 root root 26509312 Jun 26 05:14 PM25city.txt1
+-rw-r--r--. 1 root root     2924 Jun 26 21:15 pm25_job1
+-rw-r--r--. 1 root root       98 Jun 25 10:48 test
+[root@hadoop1 ~]# cat pm25_job1 
+成都,2019-2-9,56.70477815699659
+成都,2019-2-8,75.45640074211502
+成都,2019-2-7,85.05602716468591
+成都,2019-2-6,104.1522491349481
+成都,2019-2-5,149.9373913043478
+成都,2019-2-4,80.15724381625442
+成都,2019-2-3,72.72744360902256
+成都,2019-2-28,74.92293577981651
+成都,2019-2-27,58.45420560747664
+成都,2019-2-26,65.93320610687023
+成都,2019-2-25,73.10990990990992
+成都,2019-2-24,69.85191637630662
+成都,2019-2-23,117.37912087912088
+成都,2019-2-22,110.3632958801498
+成都,2019-2-21,73.71327433628319
+成都,2019-2-20,76.46460980036298
+成都,2019-2-2,94.64737793851718
+成都,2019-2-19,57.574585635359114
+成都,2019-2-18,37.37623762376238
+成都,2019-2-17,55.329446064139944
+成都,2019-2-16,67.88945578231292
+成都,2019-2-15,70.23255813953489
+成都,2019-2-14,82.96625222024866
+成都,2019-2-13,74.76785714285714
+成都,2019-2-12,52.68352059925093
+成都,2019-2-11,53.89087656529517
+成都,2019-2-10,43.973333333333336
+成都,2019-2-1,85.16606498194946
+北京,2019-2-9,31.506276150627617
+北京,2019-2-8,46.540117416829744
+北京,2019-2-7,37.265469061876246
+北京,2019-2-6,78.51948051948052
+北京,2019-2-5,170.7734082397004
+北京,2019-2-4,99.8956043956044
+北京,2019-2-3,121.0806142034549
+北京,2019-2-28,142.02212389380531
+北京,2019-2-27,101.7125
+北京,2019-2-26,66.73849372384937
+北京,2019-2-25,75.21256038647343
+北京,2019-2-24,158.76923076923077
+北京,2019-2-23,195.65865384615384
+北京,2019-2-22,207.9163179916318
+北京,2019-2-21,169.34751773049646
+北京,2019-2-20,125.2179104477612
+北京,2019-2-2,143.92638036809817
+北京,2019-2-19,156.68464730290455
+北京,2019-2-18,77.89781021897811
+北京,2019-2-17,35.91575091575091
+北京,2019-2-16,27.83622350674374
+北京,2019-2-15,37.24455205811138
+北京,2019-2-14,64.50769230769231
+北京,2019-2-13,51.111617312072894
+北京,2019-2-12,66.37869822485207
+北京,2019-2-11,83.689453125
+北京,2019-2-10,51.72357723577236
+北京,2019-2-1,86.70208728652752
+上海,2019-2-9,31.957303370786516
+上海,2019-2-8,28.922365988909426
+上海,2019-2-7,54.767100977198695
+上海,2019-2-6,85.75257731958763
+上海,2019-2-5,70.6678486997636
+上海,2019-2-4,136.88491048593352
+上海,2019-2-3,99.23975409836065
+上海,2019-2-28,54.42175066312998
+上海,2019-2-27,44.53884711779449
+上海,2019-2-26,63.329351535836174
+上海,2019-2-25,116.38689217758986
+上海,2019-2-24,154.33130081300814
+上海,2019-2-23,161.39407744874714
+上海,2019-2-22,77.63254593175853
+上海,2019-2-21,85.51724137931035
+上海,2019-2-20,80.91749174917491
+上海,2019-2-2,82.09510086455332
+上海,2019-2-19,42.13573407202216
+上海,2019-2-18,29.666011787819254
+上海,2019-2-17,41.034979423868315
+上海,2019-2-16,63.211717709720375
+上海,2019-2-15,28.83941605839416
+上海,2019-2-14,45.70854271356784
+上海,2019-2-13,44.024566473988436
+上海,2019-2-12,45.11092985318108
+上海,2019-2-11,44.08303249097473
+上海,2019-2-10,30.294117647058822
+上海,2019-2-1,87.12014134275618
+[root@hadoop1 ~]# hadoop fs -put /root/pm25_job1 /input
+[root@hadoop1 ~]# ll
+total 171684
+-rw-r--r--. 1 root root   250596 Jun 25 21:12 23.txt
+-rw-------. 1 root root     1260 Apr  4 09:57 anaconda-ks.cfg
+-rw-r--r--. 1 root root        0 Jun 26 12:06 beijing.txt
+-rw-r--r--. 1 root root 40834586 Jun 25 23:18 com.hw-1.0-SNAPSHOT.jar
+-rw-r--r--. 1 root root 40834785 Jun 26 05:10 pm-1.0-SNAPSHOT.jar
+-rw-r--r--. 1 root root 40840495 Jun 26 21:13 pm2-1.0-SNAPSHOT.jar
+-rw-r--r--. 1 root root 26509402 Jun 26 05:07 PM25city.txt
+-rw-r--r--. 1 root root 26509312 Jun 26 05:14 PM25city.txt1
+-rw-r--r--. 1 root root     2924 Jun 26 21:15 pm25_job1
+-rw-r--r--. 1 root root       98 Jun 25 10:48 test
+
+[root@hadoop1 ~]# hadoop fs -ls /input
+Found 5 items
+-rw-r--r--   1 root supergroup     250596 2020-06-25 21:23 /input/23.txt
+-rw-r--r--   1 root supergroup   26509402 2020-06-26 05:09 /input/PM25city.txt
+-rw-r--r--   1 root supergroup   26509312 2020-06-26 05:15 /input/PM25city.txt1
+-rw-r--r--   1 root supergroup       2924 2020-06-26 21:16 /input/pm25_job1
+-rw-r--r--   1 root supergroup         98 2020-06-25 10:49 /input/test
+[root@hadoop1 ~]# hadoop jar /root/pm2-1.0-SNAPSHOT.jar PM_job2 /input/pm25_job1 /output/pm25_0627_6
+20/06/26 21:52:08 INFO client.RMProxy: Connecting to ResourceManager at hadoop1/192.168.58.160:8032
+20/06/26 21:52:09 WARN mapreduce.JobSubmitter: Hadoop command-line option parsing not performed. Implement the Tool interface and execute your application with ToolRunner to remedy this.
+20/06/26 21:52:09 INFO input.FileInputFormat: Total input paths to process : 1
+20/06/26 21:52:09 INFO mapreduce.JobSubmitter: number of splits:1
+20/06/26 21:52:10 INFO mapreduce.JobSubmitter: Submitting tokens for job: job_1593142855421_0020
+20/06/26 21:52:10 INFO impl.YarnClientImpl: Submitted application application_1593142855421_0020
+20/06/26 21:52:10 INFO mapreduce.Job: The url to track the job: http://hadoop1:8088/proxy/application_1593142855421_0020/
+20/06/26 21:52:10 INFO mapreduce.Job: Running job: job_1593142855421_0020
+20/06/26 21:52:16 INFO mapreduce.Job: Job job_1593142855421_0020 running in uber mode : false
+20/06/26 21:52:16 INFO mapreduce.Job:  map 0% reduce 0%
+20/06/26 21:52:27 INFO mapreduce.Job:  map 100% reduce 0%
+20/06/26 21:52:35 INFO mapreduce.Job:  map 100% reduce 100%
+20/06/26 21:52:36 INFO mapreduce.Job: Job job_1593142855421_0020 completed successfully
+20/06/26 21:52:36 INFO mapreduce.Job: Counters: 49
+	File System Counters
+		FILE: Number of bytes read=8238
+		FILE: Number of bytes written=228011
+		FILE: Number of read operations=0
+		FILE: Number of large read operations=0
+		FILE: Number of write operations=0
+		HDFS: Number of bytes read=3024
+		HDFS: Number of bytes written=70
+		HDFS: Number of read operations=6
+		HDFS: Number of large read operations=0
+		HDFS: Number of write operations=2
+	Job Counters 
+		Launched map tasks=1
+		Launched reduce tasks=1
+		Data-local map tasks=1
+		Total time spent by all maps in occupied slots (ms)=7775
+		Total time spent by all reduces in occupied slots (ms)=5805
+		Total time spent by all map tasks (ms)=7775
+		Total time spent by all reduce tasks (ms)=5805
+		Total vcore-seconds taken by all map tasks=7775
+		Total vcore-seconds taken by all reduce tasks=5805
+		Total megabyte-seconds taken by all map tasks=7961600
+		Total megabyte-seconds taken by all reduce tasks=5944320
+	Map-Reduce Framework
+		Map input records=84
+		Map output records=84
+		Map output bytes=8064
+		Map output materialized bytes=8238
+		Input split bytes=100
+		Combine input records=0
+		Combine output records=0
+		Reduce input groups=3
+		Reduce shuffle bytes=8238
+		Reduce input records=84
+		Reduce output records=3
+		Spilled Records=168
+		Shuffled Maps =1
+		Failed Shuffles=0
+		Merged Map outputs=1
+		GC time elapsed (ms)=275
+		CPU time spent (ms)=3310
+		Physical memory (bytes) snapshot=288313344
+		Virtual memory (bytes) snapshot=4168130560
+		Total committed heap usage (bytes)=137846784
+	Shuffle Errors
+		BAD_ID=0
+		CONNECTION=0
+		IO_ERROR=0
+		WRONG_LENGTH=0
+		WRONG_MAP=0
+		WRONG_REDUCE=0
+	File Input Format Counters 
+		Bytes Read=2924
+	File Output Format Counters 
+		Bytes Written=70
+[root@hadoop1 ~]# hadoop fs -cat /output/pm25_0627_6/part-r-00000
+成都	,2	,22	,4	,0	,0
+北京	,6	,11	,5	,5	,1
+上海	,12	,12	,2	,2	,0
+
+统计2019年2月份期间（春节期间）北京、上海、成都不同空气情况的分布天数（空气质量：优、良、轻度污染、中度污染、重度污染天数分布）结果为：
+成都分别为：2  22  4  0 0
+北京分别为：6 11 5 5 5 1
+上海分别为： 12 12 2 2 0
